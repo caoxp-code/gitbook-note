@@ -141,6 +141,7 @@ runtime-only为前置编译，最终只有运行时代码。
   ): Component {
     vm.$el = el
     if (!vm.$options.render) {
+      // 通过createEmptyVNode创建vnode
       vm.$options.render = createEmptyVNode
       if (process.env.NODE_ENV !== 'production') {
         /* istanbul ignore if */
@@ -160,8 +161,10 @@ runtime-only为前置编译，最终只有运行时代码。
         }
       }
     }
+    // callHook方法，通过查看option里是否有钩子函数，如果有的话，则调用钩子函数
     callHook(vm, 'beforeMount')
 
+    // 声明方法，在此方法中调用_update和_render方法
     let updateComponent
     /* istanbul ignore if */
     if (process.env.NODE_ENV !== 'production' && config.performance && mark) {
@@ -190,6 +193,7 @@ runtime-only为前置编译，最终只有运行时代码。
     // we set this to vm._watcher inside the watcher's constructor
     // since the watcher's initial patch may call $forceUpdate (e.g. inside child
     // component's mounted hook), which relies on vm._watcher being already defined
+    // 创建Watcher，放入到vm._watchers中，监控数据改变后，直接调用updateComponent
     new Watcher(vm, updateComponent, noop, {
       before () {
         if (vm._isMounted && !vm._isDestroyed) {
@@ -201,6 +205,7 @@ runtime-only为前置编译，最终只有运行时代码。
 
     // manually mounted instance, call mounted on self
     // mounted is called for render-created child components in its inserted hook
+    // 如果为根节点，则调用mounted方法
     if (vm.$vnode == null) {
       vm._isMounted = true
       callHook(vm, 'mounted')
