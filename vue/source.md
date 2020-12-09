@@ -20,6 +20,9 @@ vue是通过rollup构建
 
 runtime-only为前置编译，最终只有运行时代码。
 
+### Vue 构建流程图
+![img](../statics/vue.jpg)
+
 ## web版本的Runtime+compiler
 入口文件为/src/platforms/web/entry-runtime-with-compiler.js
 ![entry-runtime-with-compiler.js](./../statics/vue1.jpg)
@@ -213,6 +216,228 @@ runtime-only为前置编译，最终只有运行时代码。
     return vm
   }
   ```
+### _render
+在src/core/instance/render.js中
+```
+// 返回VNode方法
+Vue.prototype._render = function (): VNode {
+  const vm: Component = this
+  // 此处render，如果options里没有的话，会直接在$mount里创建后，放入到option中
+  const { render, _parentVnode } = vm.$options
+
+  if (_parentVnode) {
+    vm.$scopedSlots = normalizeScopedSlots(
+      _parentVnode.data.scopedSlots,
+      vm.$slots,
+      vm.$scopedSlots
+    )
+  }
+
+  // set parent vnode. this allows render functions to have access
+  // to the data on the placeholder node.
+  vm.$vnode = _parentVnode
+  // render self
+  let vnode
+  try {
+    // There's no need to maintain a stack because all render fns are called
+    // separately from one another. Nested component's render fns are called
+    // when parent component is patched.
+    currentRenderingInstance = vm
+    // 调用render方法，其中参数vm.$createElement为用户手写render
+    vnode = render.call(vm._renderProxy, vm.$createElement)
+  } catch (e) {
+    handleError(e, vm, `render`)
+    // return error render result,
+    // or previous vnode to prevent render error causing blank component
+    /* istanbul ignore else */
+    if (process.env.NODE_ENV !== 'production' && vm.$options.renderError) {
+      try {
+        vnode = vm.$options.renderError.call(vm._renderProxy, vm.$createElement, e)
+      } catch (e) {
+        handleError(e, vm, `renderError`)
+        vnode = vm._vnode
+      }
+    } else {
+      vnode = vm._vnode
+    }
+  } finally {
+    currentRenderingInstance = null
+  }
+  // if the returned array contains only a single node, allow it
+  // 生成的vnode只能是一个节点
+  if (Array.isArray(vnode) && vnode.length === 1) {
+    vnode = vnode[0]
+  }
+  // return empty vnode in case the render function errored out
+  if (!(vnode instanceof VNode)) {
+    if (process.env.NODE_ENV !== 'production' && Array.isArray(vnode)) {
+      warn(
+        'Multiple root nodes returned from render function. Render function ' +
+        'should return a single root node.',
+        vm
+      )
+    }
+    vnode = createEmptyVNode()
+  }
+  // set parent
+  vnode.parent = _parentVnode
+  return vnode
+}
+```
+### virtualDom
+通过render返回的VNode为虚拟dom，即virtualDom
+
+代码位于src/core/vdom/vnode.js，为声明的一个简单的类.
+从virtualDom到真实dom，需要经过create、diff、patch等过程
+![vnode](./../statics/vnode.jpg)
+
+#### createElement
+vue通过createElement创建VNode,代码在src/core/vdom/create-element.js中
+```
+// 通过对参数进行处理，最后调用_createElement方法
+export function createElement (
+  context: Component,
+  tag: any,
+  data: any,
+  children: any,
+  normalizationType: any,
+  alwaysNormalize: boolean
+): VNode | Array<VNode> {
+  // data是数组或是原始类型数据
+  if (Array.isArray(data) || isPrimitive(data)) {
+    normalizationType = children
+    children = data
+    data = undefined
+  }
+  if (isTrue(alwaysNormalize)) {
+    normalizationType = ALWAYS_NORMALIZE
+  }
+  return _createElement(context, tag, data, children, normalizationType)
+}
+
+export function _createElement (
+  context: Component,
+  tag?: string | Class<Component> | Function | Object,
+  data?: VNodeData,
+  children?: any,
+  normalizationType?: number
+): VNode | Array<VNode> {
+  // data不为undefined或null，并且data已经处于监控模式
+  if (isDef(data) && isDef((data: any).__ob__)) {
+    process.env.NODE_ENV !== 'production' && warn(
+      `Avoid using observed data object as vnode data: ${JSON.stringify(data)}\n` +
+      'Always create fresh vnode data objects in each render!',
+      context
+    )
+    // 返回空vnode
+    return createEmptyVNode()
+  }
+  // object syntax in v-bind
+  if (isDef(data) && isDef(data.is)) {
+    tag = data.is
+  }
+  if (!tag) {
+    // in case of component :is set to falsy value
+    return createEmptyVNode()
+  }
+  // warn against non-primitive key
+  if (process.env.NODE_ENV !== 'production' &&
+    isDef(data) && isDef(data.key) && !isPrimitive(data.key)
+  ) {
+    if (!__WEEX__ || !('@binding' in data.key)) {
+      warn(
+        'Avoid using non-primitive value as key, ' +
+        'use string/number value instead.',
+        context
+      )
+    }
+  }
+  // support single function children as default scoped slot
+  if (Array.isArray(children) &&
+    typeof children[0] === 'function'
+  ) {
+    data = data || {}
+    data.scopedSlots = { default: children[0] }
+    children.length = 0
+  }
+  // 根据children不同的类型，格式化children，返回vnode类型
+  if (normalizationType === ALWAYS_NORMALIZE) {
+    children = normalizeChildren(children)
+  } else if (normalizationType === SIMPLE_NORMALIZE) {
+    children = simpleNormalizeChildren(children)
+  }
+  let vnode, ns
+  if (typeof tag === 'string') {
+    let Ctor
+    ns = (context.$vnode && context.$vnode.ns) || config.getTagNamespace(tag)
+    if (config.isReservedTag(tag)) {
+      // platform built-in elements
+      if (process.env.NODE_ENV !== 'production' && isDef(data) && isDef(data.nativeOn)) {
+        warn(
+          `The .native modifier for v-on is only valid on components but it was used on <${tag}>.`,
+          context
+        )
+      }
+      vnode = new VNode(
+        config.parsePlatformTagName(tag), data, children,
+        undefined, undefined, context
+      )
+    } else if ((!data || !data.pre) && isDef(Ctor = resolveAsset(context.$options, 'components', tag))) {
+      // component
+      vnode = createComponent(Ctor, data, context, children, tag)
+    } else {
+      // unknown or unlisted namespaced elements
+      // check at runtime because it may get assigned a namespace when its
+      // parent normalizes children
+      vnode = new VNode(
+        tag, data, children,
+        undefined, undefined, context
+      )
+    }
+  } else {
+    // direct component options / constructor
+    vnode = createComponent(tag, data, context, children)
+  }
+  if (Array.isArray(vnode)) {
+    return vnode
+  } else if (isDef(vnode)) {
+    if (isDef(ns)) applyNS(vnode, ns)
+    if (isDef(data)) registerDeepBindings(data)
+    return vnode
+  } else {
+    return createEmptyVNode()
+  }
+}
+```
+#### _update
+代码在/src/core/instance/lifecycle.js中，通过在初始化时候声明.此方式在首次渲染和数据变更后，触发。
+
+在_update方法中最主要是调用vm.__patch__方法。此方法在weex和web平台有不同的实现。
+
+web中代码在/src/platforms/web/runtime/index.js中
+```
+// install platform patch function
+// 根据是否在浏览器中，调用不同的patch。
+// noop为一个空方法
+// patch代码为/src/platforms/web/runtime/patch.js
+Vue.prototype.__patch__ = inBrowser ? patch : noop
+```
+
+```
+// 声明了一些dom操作的方法
+import * as nodeOps from 'web/runtime/node-ops'
+import { createPatchFunction } from 'core/vdom/patch'
+// 包括directive和ref
+import baseModules from 'core/vdom/modules/index'
+import platformModules from 'web/runtime/modules/index'
+
+// the directive module should be applied last, after all
+// built-in modules have been applied.
+const modules = platformModules.concat(baseModules)
+export const patch: Function = createPatchFunction({ nodeOps, modules })
+```
+#### vue从初始化到生成dom过程
+![process](../statics/process.png)
 
 ## Object.defineProperty(obj, prop, descriptor)
 ### descriptor
